@@ -1,0 +1,161 @@
+# padelfusion: padel match video analyzer v0
+
+This tool turns a 5–10 minute phone recording of a padel match into positional and rally stats you can check by hand:
+
+- player heatmaps
+- net vs. back time
+- distance covered
+- rally count and duration
+- shot count (from audio)
+
+Every stat carries a **High / Medium / Low** confidence label. v0 does not do ball tracking, shot types, or winners/errors. Those need labelled training data (v1+).
+
+```
+video ──► court mapping ──► player detection ──► 4-ID tracker (team-half constrained) ─┐
+   │                                                                                    ├─► event timeline ──► stats engine ──► report
+   └────► audio impact onsets ─────────────► shot fusion (onset × player swing) ────────┘   (JSON + CSV)       (confidence)      (HTML)
+                                                                                                                  │
+                                                                                                                  └─► Claude summary (reads the stats; every
+                                                                                                                       figure is checked, or the summary is withheld)
+```
+
+The **event timeline** (`timeline.json` plus CSVs) is the core asset. Every stat is computed from it, never from the raw video. It is what gets validated against hand counts, and it is the layer that v1 ball tracking and v2 sensor data will extend.
+
+## Easiest way: the point-and-click app
+
+Everything works through buttons in your browser. You don't need a terminal. See [INSTALL.md](INSTALL.md) for full installation details (requirements, troubleshooting, YOLO weights, Claude API key setup).
+
+1. **Install Python 3.10 or newer** once, from https://www.python.org/downloads/. On Windows, tick "Add python.exe to PATH".
+2. **Download this repository**: on GitHub, choose *Code → Download ZIP* and unzip it.
+3. **Double-click the launcher** for your system:
+   - macOS: `start-mac.command`. The first time, macOS may block it; right-click → *Open* → *Open*.
+   - Windows: `start-windows.bat`
+   - Linux: `start-linux.sh`
+
+   The first launch installs everything into a `.venv` folder next to it (a few minutes, larger with the YOLO detector). After that it starts in seconds. Your browser opens at `http://127.0.0.1:8765`. Keep the launcher window open while you use the app.
+
+In the app:
+
+| Button | What it does |
+|--------|--------------|
+| **Choose video…** | Uploads your match. The capture check runs straight away. |
+| **Tap yourself** / **Court corners** | Click on yourself in the first frame. The court is detected automatically and drawn in green. If it's wrong, use **Set corners by hand** and click the four corners. |
+| **Analyze match** | Runs the pipeline with a progress bar. |
+| **Open full report** | Heatmaps, stats with confidence labels, clip links per rally. |
+| **Hand-count to check it** | Play the video and press **Shot** (key `S`) at every hit and **End of rally** (`E`) after every point. Positions per shot are optional. Labels save automatically. |
+| **Compare with the analysis** | Validation against the PRD thresholds, as PASS/FAIL. |
+
+To get Claude coaching summaries, paste an Anthropic API key on the home page. It is stored only on your computer, in the data folder.
+
+Videos and results are kept in `padelfusion-data/` inside the project folder (set `PADELFUSION_DATA` to change it). Nothing leaves your computer except the stats sent to Claude, and only if you add a key. If your browser can't play an iPhone HEVC video on the hand-count page, click **Make a playable copy**.
+
+## Install (command line)
+
+```bash
+pip install -e .              # core: numpy, scipy, opencv, matplotlib, bundled ffmpeg
+pip install -e '.[yolo]'      # recommended for real footage: YOLO person detector
+pip install -e '.[llm]'       # Claude coaching summary (needs ANTHROPIC_API_KEY or `ant auth login`)
+pip install -e '.[dev]'       # pytest
+```
+
+## Capture spec (the only supported setup)
+
+| Parameter   | Requirement |
+|-------------|-------------|
+| Position    | Centred behind one back glass, as high as a tripod or fence mount allows |
+| Framing     | All four court corners and the net visible in every frame |
+| Orientation | Landscape, no zoom, no movement during play |
+| Resolution  | 1080p minimum |
+| Frame rate  | 30 fps minimum (60 preferred) |
+| Audio       | On |
+| Length      | 5–10 minutes for v0 tests |
+
+Files that fail the spec (not MP4/MOV, no audio, below 30 fps, below 1080p, portrait) are rejected with the reason.
+
+## Usage
+
+```bash
+# 1. Grab the first frame with a pixel grid and find a point on yourself (and the corners, if needed)
+padelfusion frame match.mp4 frame.png
+
+# 2. Analyze. --me is a pixel on you in the first frame (the self-tag)
+padelfusion analyze match.mp4 --out runs/match1 --me 640,820
+
+#    If automatic court detection fails, pass the corners manually:
+#    near-left, near-right, far-right, far-left (near = camera side)
+padelfusion analyze match.mp4 --out runs/match1 --me 640,820 \
+    --corners '230,1010;1690,1010;1267,324;653,324'
+
+# 3. Validate against a hand-labelled set
+padelfusion validate runs/match1 labels.json
+
+# Synthetic end-to-end demo (renders a match with known ground truth)
+padelfusion demo out/demo --no-llm
+```
+
+Other `analyze` flags: `--detector auto|yolo|background`, `--analysis-fps 15`, `--clips` (cut one MP4 per rally), `--no-llm`, `--skip-capture-check`.
+
+### Outputs (`--out` directory)
+
+| File | Content |
+|------|---------|
+| `report.html` | Heatmaps, stats table with a confidence label per stat, rally list with clip links, flagged tracking segments, coaching summary |
+| `timeline.json` | Full event timeline: metadata (court, config), players, positions, shots, rallies, flagged segments, rejected onsets |
+| `positions.csv`, `shots.csv`, `rallies.csv`, `flagged_segments.csv`, `events.csv` | The same timeline as CSV |
+| `stats.json` | Every computed stat with its value, display string, confidence, method and notes, plus heatmap grids |
+| `summary.json` | The Claude summary and its status (`ok` / `withheld` / `skipped` / `error`) |
+
+## How each piece works
+
+- **Court mapping** (`court.py`). Padel courts paint only the service lines and the centre service line; the perimeter is glass. Detection finds the two service lines, which run wall to wall, so their endpoints are four known court points. It fits the homography from those and scores the fit by painted-line support. There's a penalty if the centre line runs past the service lines, which catches the net tape being taken for a service line. Below the score threshold, the pipeline asks for manual corners.
+- **Player detection** (`detection.py`). The recommended backend is YOLO. The CPU fallback is background subtraction against a temporal median. Its background frames are sampled around audio impacts, when players are spread out, so resting players don't get baked into the background. Blobs whose structure lives in the background rather than in the frame are dropped as ghosts. Detections whose feet map outside the court are dropped, which removes glass reflections and neighbouring courts.
+- **Tracking** (`tracking.py`). Each team is constrained to its half of the net, so a swap is only possible between partners. Assignment uses the Hungarian algorithm on court distance plus an appearance (hue/saturation) cost. Frames where the swapped assignment is nearly as good, partners are within 0.9 m, or two partners merge into one detection are **flagged**, not guessed. Gaps up to 1 s are interpolated; longer ones become `lost` segments. The user's self-tag makes them `P1`, their partner is `P2`, and the opponents are `P3`/`P4`.
+- **Shots** (`audio.py`, `events.py`). Audio is band-passed to 1–6 kHz, peaks are picked on the spectral flux with an adaptive threshold, and onsets far quieter than this court's typical impacts are split off. An onset counts as a shot only if some player shows a swing-like bounding-box change within −0.4 s / +0.25 s. Walking isn't enough, because players walk between points while neighbouring courts keep playing.
+- **Rallies**. Shots are split on gaps over 3.5 s or on a player reset (everyone still for 2 s). A rally needs at least 2 confirmed shots. Duration runs from the first shot to the last.
+- **Stats** (`stats.py`). Base tiers follow the PRD: heatmaps and net time are High; distance, shots and rallies are Medium; shot attribution is Low. A tier drops a level when more than 15% of the player's track is flagged, when coverage is under 70%, or when auto court mapping had weak line support. "At net when a shot is struck" mirrors the ground-truth protocol directly.
+- **LLM layer** (`llm.py`). Claude (`claude-opus-5-5`) gets only the computed stats. Every number in its text must match a number in a stat's display string or notes. If one doesn't, Claude gets one rewrite. If it fails again, the summary is withheld and the report says so. Server-side refusal fallback is enabled (`fallbacks: "default"`).
+- **Validation** (`validate.py`). Rally count ±5%, shot count ±10% (plus timing precision and recall at ±0.2 s), net-time share at labelled shots ±5 pp, unflagged partner swaps ≤ 1 per 5 min, and zero stats without a confidence label.
+
+### Ground-truth label format
+
+```json
+{
+  "window": {"start": 0, "end": 600},
+  "rallies": [{"start": 12.3, "end": 19.8}],
+  "shots": [12.3, 13.4, 14.9],
+  "positions_at_shots": [{"t": 12.3, "player": "P1", "zone": "net", "side": "left"}]
+}
+```
+
+`zone` is the front (`net`) or back half of the player's own 10 m side. `side` is left or right as seen from the camera, and it is used to count partner swaps. `window` is optional.
+
+## Tests
+
+```bash
+pytest
+```
+
+The unit tests cover:
+
+- homography and auto court detection
+- capture-spec rejections
+- onset detection
+- tracker constraints and flags
+- rally segmentation
+- distance smoothing
+- confidence enforcement
+- the LLM figure guard (with a fake client)
+- validation
+
+An end-to-end test renders a synthetic match, runs the whole pipeline on the video file, and checks the validation metrics.
+
+## Known limits (things v0 is meant to measure, not hide)
+
+- **The synthetic generator exercises the code, not real-world accuracy.** Only the three-match hand-count protocol answers that.
+- The background detector merges players who overlap and can't handle camera shake. Use YOLO on real footage.
+- Audio can't yet tell racket impacts from glass or floor bounces with the same spectrum. Shot counts stay Medium until they're validated.
+- Serve faults (1-shot points) are not counted as rallies with the default `min_shots = 2`.
+- Net share at labelled shots is sensitive to players standing on the zone boundary. Short clips with few shots swing by several points per borderline shot.
+- Shot attribution is the most active player near the impact, with no pose model yet. It is labelled Low.
+
+All thresholds live in `config.py`, and the full config is written into every timeline for reproducibility.

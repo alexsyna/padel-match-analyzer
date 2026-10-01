@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Padel Analyzer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E🎾%3C/text%3E%3C/svg%3E">
+<style>
+:root{--bg:#f6f6f3;--panel:#fff;--fg:#1a1c1e;--muted:#63666b;--line:#e1e1dc;--accent:#1d6fd8;--accent-fg:#fff;
+--good:#1f7a3f;--warn:#9a6a00;--bad:#b3261e;--soft:#eef3fb}
+@media (prefers-color-scheme:dark){:root{--bg:#131416;--panel:#1c1d20;--fg:#ebebea;--muted:#9c9ea3;--line:#2d2f33;
+--accent:#6aa6ff;--accent-fg:#0b1220;--good:#5fd08a;--warn:#e3b341;--bad:#ff8a80;--soft:#1f2733}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+header a{color:inherit;text-decoration:none;font-weight:650;font-size:17px}
+header .sp{flex:1}
+main{max-width:1040px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:22px;margin:4px 0 14px}h2{font-size:16px;margin:0 0 10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:760px){.grid2{grid-template-columns:1fr}}
+button,.btn{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--fg);padding:8px 14px;border-radius:8px;
+cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+button:hover,.btn:hover{border-color:var(--accent)}
+button.primary,.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+button.big{padding:12px 20px;font-size:16px}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.danger{color:var(--bad)}
+button.on{background:var(--soft);border-color:var(--accent)}
+.muted{color:var(--muted)}.small{font-size:13px}
+.ok{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.badge{font-size:12px;font-weight:600;padding:1px 8px;border-radius:10px;border:1px solid currentColor;white-space:nowrap}
+.High{color:var(--good)}.Medium{color:var(--warn)}.Low{color:var(--bad)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.tw{overflow-x:auto}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:28px;text-align:center}
+.drop.hover{border-color:var(--accent);background:var(--soft)}
+.bar{height:10px;background:var(--line);border-radius:6px;overflow:hidden}
+.bar>div{height:100%;background:var(--accent);transition:width .4s}
+.canvaswrap{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--line);background:#000}
+canvas{display:block;width:100%;height:auto;cursor:crosshair}
+.steps{counter-reset:s}
+.step{display:flex;gap:10px;margin:8px 0}.step b.n{flex:none;width:24px;height:24px;border-radius:50%;background:var(--soft);
+display:grid;place-items:center;font-size:13px}
+.step.done b.n{background:var(--good);color:#fff}
+video{width:100%;border-radius:8px;background:#000;display:block}
+.kbd{font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.shotrow td{padding:4px 6px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:2px 7px;font-size:12px}
+.seg button.on{background:var(--accent);color:var(--accent-fg)}
+input[type=text],input[type=password],select{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;
+background:var(--panel);color:var(--fg)}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 16px;
+border-radius:8px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
+.stat{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
+</style>
+</head>
+<body>
+<header><a href="#/">🎾 Padel Analyzer</a><span class="sp"></span><span id="envnote" class="muted small"></span></header>
+<main id="app"></main>
+<div id="toast" class="toast"></div>
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const api = async (path, opts = {}) => {
+  const r = await fetch("/api/" + path, {headers: {"Content-Type": "application/json"}, ...opts,
+    body: opts.body && typeof opts.body !== "string" ? JSON.stringify(opts.body) : opts.body});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+};
+const toast = msg => { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2200); };
+const fmtT = t => { t = Math.max(0, t || 0); const m = Math.floor(t / 60); return m + ":" + (t - m * 60).toFixed(1).padStart(4, "0"); };
+let ENV = {}, poll = null, stopOverlay = null;
+const stopPoll = () => { if (poll) clearInterval(poll); poll = null; };
+
+async function loadEnv() {
+  ENV = await api("env");
+  $("#envnote").textContent = "Data folder: " + ENV.data_dir;
+}
+
+// ---------------------------------------------------------------- router
+window.addEventListener("hashchange", route);
+async function route() {
+  stopPoll();
+  if (stopOverlay) { stopOverlay(); stopOverlay = null; }
+  document.onkeydown = null;
+  const h = location.hash.replace(/^#\/?/, "").split("/");
+  try {
+    if (h[0] === "run" && h[1]) return await runView(h[1]);
+    if (h[0] === "label" && h[1]) return await labelView(h[1]);
+    return await homeView();
+  } catch (e) { $("#app").innerHTML = `<div class="card bad">${esc(e.message)}</div>`; }
+}
+
+// ---------------------------------------------------------------- home
+async function homeView() {
+  const runs = await api("runs");
+  $("#app").innerHTML = `
+  <h1>Analyze a padel match</h1>
+  <div class="grid2">
+    <div class="card">
+      <h2>Your match video</h2>
+      <div class="drop" id="drop">
+        <p style="margin:0 0 12px">Drag a video here, or</p>
+        <button class="primary big" id="pick">Choose video…</button>
+        <input type="file" id="file" accept="video/mp4,video/quicktime,.mp4,.mov" hidden>
+        <p class="muted small" style="margin:12px 0 0">Phone behind the back glass, all four corners and the net in view,
+        landscape, 1080p, 30 fps or more, sound on, 5–10 min.</p>
+      </div>
+      <div id="up" hidden style="margin-top:12px"><div class="bar"><div id="upbar" style="width:0"></div></div>
+        <p class="muted small" id="uptext">Uploading…</p></div>
+    </div>
+    <div class="card">
+      <h2>Coaching summary by Claude (optional)</h2>
+      <p class="muted small" id="keystate">${ENV.anthropic_key ? "✓ An Anthropic API key is saved on this computer." : "Add an Anthropic API key to get a written coaching summary in each report."}</p>
+      <div class="row"><input type="password" id="key" placeholder="sk-ant-…" style="flex:1;min-width:180px">
+      <button id="savekey">Save</button>${ENV.anthropic_key ? '<button id="delkey" class="danger">Remove</button>' : ""}</div>
+    </div>
+  </div>
+  <div class="card"><h2>Your analyses</h2>${runs.length ? `<div class="tw"><table>
+    <tr><th>Video</th><th>Added</th><th>Status</th><th></th></tr>
+    ${runs.map(r => `<tr><td><a href="#/run/${r.id}">${esc(r.name)}</a></td>
+      <td class="muted">${new Date(r.created * 1000).toLocaleString()}</td>
+      <td>${stateBadge(r)}</td>
+      <td style="text-align:right"><a class="btn" href="#/run/${r.id}">Open</a>
+      <button class="danger" data-del="${r.id}">Delete</button></td></tr>`).join("")}
+  </table></div>` : `<p class="muted">Nothing yet. Upload a video.</p>`}</div>`;
+
+  const file = $("#file");
+  $("#pick").onclick = () => file.click();
+  file.onchange = () => file.files[0] && upload(file.files[0]);
+  const drop = $("#drop");
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add("hover"); };
+  drop.ondragleave = () => drop.classList.remove("hover");
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove("hover"); e.dataTransfer.files[0] && upload(e.dataTransfer.files[0]); };
+  $("#savekey").onclick = async () => { const k = $("#key").value.trim(); if (!k) return toast("Paste a key first");
+    await api("settings", {method: "PUT", body: {anthropic_api_key: k}}); await loadEnv(); toast("Key saved"); homeView(); };
+  if ($("#delkey")) $("#delkey").onclick = async () => { await api("settings", {method: "PUT", body: {anthropic_api_key: ""}}); await loadEnv(); homeView(); };
+  document.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    if (!confirm("Delete this analysis and its video copy?")) return;
+    await api("runs/" + b.dataset.del, {method: "DELETE"}); homeView(); });
+}
+
+function stateBadge(r) {
+  const m = {ready: ["Needs setup", "warn"], running: ["Analyzing…", "muted"], done: ["Done", "ok"], error: ["Error", "bad"], new: ["Uploading", "muted"]}[r.state] || [r.state, "muted"];
+  return `<span class="badge ${m[1]}">${m[0]}</span>`;
+}
+
+function upload(f) {
+  $("#up").hidden = false;
+  const xhr = new XMLHttpRequest();
+  xhr.open("PUT", "/api/upload?filename=" + encodeURIComponent(f.name));
+  xhr.upload.onprogress = e => { if (e.lengthComputable) { $("#upbar").style.width = (100 * e.loaded / e.total) + "%";
+    $("#uptext").textContent = `Uploading ${(e.loaded / 1e6).toFixed(0)} / ${(e.total / 1e6).toFixed(0)} MB…`; } };
+  xhr.upload.onload = () => $("#uptext").textContent = "Reading the video…";
+  xhr.onload = () => { const r = JSON.parse(xhr.responseText); if (xhr.status >= 400) return toast(r.error); location.hash = "#/run/" + r.id; };
+  xhr.onerror = () => toast("Upload failed");
+  xhr.send(f);
+}
+
+// ---------------------------------------------------------------- run
+async function runView(id, forceSetup = false) {
+  const run = await api("runs/" + id);
+  if (run.state === "running" || run.state === "new") return progressView(run);
+  if ((run.state === "ready" || forceSetup) && run.info) return setupView(run);
+  if (run.state === "done") return resultsView(run);
+  $("#app").innerHTML = `<h1>${esc(run.name)}</h1><div class="card"><h2 class="bad">Something went wrong</h2>
+    <p>${esc(run.error)}</p>${hint(run.error)}
+    <div class="row">${run.info ? `<button class="primary" id="back">Back to setup</button>` : ""}<a class="btn" href="#/">Home</a></div>
+    ${run.traceback ? `<details style="margin-top:12px"><summary class="muted small">Technical details</summary><pre class="small" style="white-space:pre-wrap">${esc(run.traceback)}</pre></details>` : ""}</div>`;
+  if ($("#back")) $("#back").onclick = () => runView(id, true);
+}
+
+function hint(err) {
+  err = err || "";
+  if (err.includes("court")) return `<p class="muted">Tip: go back and use <b>Set corners by hand</b>: click the four court corners on the frame.</p>`;
+  if (err.includes("tagged player")) return `<p class="muted">Tip: make sure the player you tapped as yourself is clearly visible early in the clip.</p>`;
+  if (err.includes("rejected")) return `<p class="muted">Tip: go back and tick <b>Analyze anyway</b> to try regardless.</p>`;
+  return "";
+}
+
+function progressView(run) {
+  $("#app").innerHTML = `<h1>${esc(run.name)}</h1><div class="card">
+    <h2 id="stage">${esc(run.stage || "Starting…")}</h2>
+    <div class="bar"><div id="pbar" style="width:${100 * (run.progress || 0)}%"></div></div>
+    <p class="muted small" id="pct"></p><ul id="plog" class="muted small"></ul>
+    <p class="muted small">You can leave this page. The analysis keeps running while the app window is open.</p></div>`;
+  const t0 = Date.now();
+  const tick = async () => {
+    const r = await api("runs/" + run.id).catch(() => null);
+    if (!r) return;
+    if (r.state !== "running" && r.state !== "new") { stopPoll(); return runView(run.id); }
+    $("#stage").textContent = r.stage || "Working…";
+    $("#pbar").style.width = (100 * (r.progress || 0)) + "%";
+    const p = r.progress || 0, el = (Date.now() - t0) / 1000;
+    $("#pct").textContent = `${Math.round(100 * p)}%` + (p > 0.15 && el > 10 ? ` · about ${Math.max(1, Math.round(el * (1 - p) / p / 60))} min left` : "");
+    $("#plog").innerHTML = (r.log || []).map((l, i, a) => `<li>${i < a.length - 1 ? "✓" : "…"} ${esc(l.stage)}</li>`).join("");
+  };
+  tick(); poll = setInterval(tick, 1200);
+}
+
+async function setupView(run) {
+  const id = run.id, opts = run.options || {};
+  const st = {me: opts.me || null, corners: opts.corners || null, auto: null, mode: "me",
+             linePts: {}, lineName: null, missing: null, lines: null, manualOn: !!opts.corners};
+  const info = run.info, errs = run.capture_errors || [], warns = run.capture_warnings || [];
+  $("#app").innerHTML = `<h1>${esc(run.name)}</h1>
+  <div class="card"><h2>Video check</h2>
+    <p class="muted small">${info.width}×${info.height} · ${info.fps.toFixed(1)} fps · ${(info.duration_s / 60).toFixed(1)} min · audio ${info.has_audio ? "yes" : "no"}</p>
+    ${errs.length ? `<ul class="bad">${errs.map(e => `<li>${esc(e)}</li>`).join("")}</ul>
+      <label class="row"><input type="checkbox" id="anyway"> Analyze anyway (numbers may be unreliable)</label>`
+      : `<p class="ok">✓ Meets the capture spec.</p>`}
+    ${warns.map(w => `<p class="warn small">⚠ ${esc(w)}</p>`).join("")}
+  </div>
+  <div class="card">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">Set up the first frame</h2>
+      <div class="seg" id="modes"><button data-m="me" class="on">1 · Tap yourself</button><button data-m="corners">2 · Court corners</button></div></div>
+    <p id="instr" class="small" style="margin:10px 0"></p>
+    <p id="missing" class="bad small"></p>
+    <div class="canvaswrap"><canvas id="cv"></canvas></div>
+    <div class="row" style="margin-top:10px" id="courtbtns"></div>
+    <div class="row" style="margin-top:8px" id="linebtns"></div>
+  </div>
+  <div class="card"><h2>Options</h2>
+    <div class="row" style="margin-bottom:8px"><label>Player detector
+      <select id="det"><option value="auto">Automatic</option>
+      <option value="yolo" ${ENV.yolo ? "" : "disabled"}>YOLO (best for real video)${ENV.yolo ? "" : ", not installed"}</option>
+      <option value="background">Background subtraction (fast)</option></select></label></div>
+    <label class="row"><input type="checkbox" id="llm" ${ENV.anthropic_key ? "checked" : "disabled"}> Coaching summary by Claude
+      ${ENV.anthropic_key ? "" : `<span class="muted small">(add an API key on the home page)</span>`}</label>
+    <label class="row"><input type="checkbox" id="clips" ${opts.clips ? "checked" : ""}> Save a video clip for every rally (slower)</label>
+  </div>
+  <div class="row"><button class="primary big" id="go">Analyze match</button><span class="muted small" id="gonote"></span></div>`;
+  if (opts.detector) $("#det").value = opts.detector;
+
+  const cv = $("#cv"), ctx = cv.getContext("2d"), img = new Image();
+  img.src = `/files/${id}/frame0.jpg?${Date.now()}`;
+  await new Promise(r => img.onload = r);
+  cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+  const LINE_DEFS = [["near_baseline", "Near baseline"], ["far_baseline", "Far baseline"],
+    ["left_sideline", "Left sideline"], ["right_sideline", "Right sideline"]];
+  const LINE_COLORS = {near_baseline: "#ffcc00", far_baseline: "#ff8a00", left_sideline: "#00d1ff", right_sideline: "#7dff4d"};
+
+  function draw() {
+    ctx.drawImage(img, 0, 0);
+    const lw = Math.max(2, cv.width / 500);
+    if (st.lines) { ctx.strokeStyle = "rgba(0,255,170,.95)"; ctx.lineWidth = lw;
+      st.lines.forEach(pl => { ctx.beginPath(); pl.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke(); }); }
+    Object.entries(st.linePts).forEach(([name, pts]) => {
+      ctx.fillStyle = LINE_COLORS[name] || "#ffcc00";
+      pts.forEach(([x, y]) => { ctx.beginPath(); ctx.arc(x, y, lw * 3, 0, 7); ctx.fill(); });
+    });
+    if (st.me) { const [x, y] = st.me; ctx.strokeStyle = "#ff3b6b"; ctx.lineWidth = lw * 1.5;
+      ctx.beginPath(); ctx.arc(x, y, lw * 9, 0, 7); ctx.stroke();
+      ctx.fillStyle = "#ff3b6b"; ctx.font = `bold ${lw * 10}px system-ui`; ctx.fillText("ME", x + lw * 11, y); }
+  }
+  function refresh() {
+    draw();
+    document.querySelectorAll("#modes button").forEach(b => b.classList.toggle("on", b.dataset.m === st.mode));
+    const court = st.corners ? (st.auto && st.corners === st.auto.corners ? "Court found automatically." : "Court corners set by hand.") : "";
+    if (st.mode === "me") $("#instr").innerHTML = st.me ? `✓ You're marked. Click again to move the marker. Then check the court in step 2.`
+      : `<b>Click on yourself</b> in the frame, so the app knows which player is you.`;
+    else if (st.manualOn) $("#instr").innerHTML = st.lineName
+      ? `Click 2 or more points along the <b>${LINE_DEFS.find(l => l[0] === st.lineName)[1]}</b>, anywhere it's visible. (${(st.linePts[st.lineName] || []).length} placed)`
+      : `Pick a line below, then click points along it. Only the lines you can actually see need any points — click <b>Compute corners</b> when done.`;
+    else $("#instr").innerHTML = st.corners ? `✓ ${court} Check that the green lines sit on the court's painted lines and walls.`
+      : `The court wasn't found automatically. Click <b>Set corners by hand</b>.`;
+    $("#missing").textContent = st.missing
+      ? "Couldn't determine: " + Object.entries(st.missing).map(([c, r]) => `${c} (${r})`).join("; ")
+      : "";
+    $("#courtbtns").innerHTML = st.mode === "corners" ? `<button id="auto">Detect court automatically</button>
+      <button id="manual">Set corners by hand</button>
+      ${st.manualOn ? `<button id="compute">Compute corners</button><button id="undo">Undo point</button>` : ""}` : "";
+    $("#linebtns").innerHTML = (st.mode === "corners" && st.manualOn) ? LINE_DEFS.map(([name, label]) =>
+      `<button data-line="${name}" class="${st.lineName === name ? "on" : ""}" style="border-color:${LINE_COLORS[name]}">
+        ${label} (${(st.linePts[name] || []).length})</button>`).join("") : "";
+    if ($("#auto")) $("#auto").onclick = detect;
+    if ($("#manual")) $("#manual").onclick = () => { st.linePts = {}; st.lineName = null; st.corners = null; st.lines = null;
+      st.missing = null; st.mode = "corners"; st.manualOn = true; refresh(); };
+    if ($("#compute")) $("#compute").onclick = computeCorners;
+    if ($("#undo")) $("#undo").onclick = () => { if (st.lineName && (st.linePts[st.lineName] || []).length)
+      st.linePts[st.lineName].pop(); st.corners = null; st.lines = null; refresh(); };
+    document.querySelectorAll("#linebtns [data-line]").forEach(b => b.onclick = () => { st.lineName = b.dataset.line; refresh(); });
+    $("#go").disabled = !st.corners;
+    $("#gonote").textContent = !st.corners ? "Set the court first (step 2)." : !st.me ? "Tip: tap yourself first, or P1 will be the near-left player." : "";
+  }
+  async function detect() {
+    $("#instr").textContent = "Looking for the court lines…";
+    const r = await api(`runs/${id}/court/detect`, {method: "POST"});
+    st.linePts = {}; st.lineName = null; st.manualOn = false; st.missing = null;
+    if (r.found) { st.auto = r; st.corners = r.corners; st.lines = r.lines; toast(`Court found (line score ${r.score})`); }
+    else { st.corners = null; st.lines = null; toast("Court not found automatically"); }
+    refresh();
+  }
+  async function computeCorners() {
+    const r = await api(`runs/${id}/court/from_lines`, {method: "POST", body: {lines: st.linePts}});
+    const order = ["near_left", "near_right", "far_right", "far_left"];
+    if (order.every(k => r.corners[k])) {
+      st.corners = order.map(k => r.corners[k]);
+      st.missing = null;
+      st.lines = (await api(`runs/${id}/court/preview`, {method: "POST", body: {corners: st.corners}})).lines;
+      toast("Corners computed");
+    } else {
+      st.corners = null;
+      st.missing = r.missing;
+      toast("Some corners couldn't be determined — see details below");
+    }
+    refresh();
+  }
+  cv.onclick = e => {
+    const b = cv.getBoundingClientRect();
+    const p = [(e.clientX - b.left) * cv.width / b.width, (e.clientY - b.top) * cv.height / b.height].map(v => Math.round(v));
+    if (st.mode === "me") { st.me = p; refresh(); if (!st.corners) { st.mode = "corners"; refresh(); } return; }
+    if (!st.manualOn) return toast("Click “Set corners by hand” to place points");
+    if (!st.lineName) return toast("Pick a line first");
+    (st.linePts[st.lineName] = st.linePts[st.lineName] || []).push(p);
+    st.corners = null;
+    refresh();
+  };
+  document.querySelectorAll("#modes button").forEach(b => b.onclick = () => { st.mode = b.dataset.m; refresh(); });
+  $("#go").onclick = async () => {
+    if (errs.length && !($("#anyway") && $("#anyway").checked)) return toast("The video fails the capture check. Tick “Analyze anyway” to continue.");
+    await api(`runs/${id}/analyze`, {method: "POST", body: {me: st.me, corners: st.manualOn ? st.corners : null,
+      detector: $("#det").value, llm: $("#llm").checked, clips: $("#clips").checked, skip_capture_check: !!($("#anyway") && $("#anyway").checked)}});
+    runView(id);
+  };
+  refresh();
+  if (st.corners) st.lines = (await api(`runs/${id}/court/preview`, {method: "POST", body: {corners: st.corners}})).lines, refresh();
+  else detect();
+}
+
+function statsTable(stats) {
+  const players = ["match", "P1", "P2", "P3", "P4"];
+  const rows = stats.slice().sort((a, b) => players.indexOf(a.player || "match") - players.indexOf(b.player || "match"));
+  return `<div class="tw"><table><tr><th>Stat</th><th>Player</th><th>Value</th><th>Confidence</th></tr>
+    ${rows.map(s => `<tr><td>${esc(s.label)}</td><td>${esc(s.player || "match")}</td><td>${esc(s.display)}</td>
+    <td><span class="badge ${s.confidence}">${s.confidence}</span></td></tr>`).join("")}</table></div>`;
+}
+
+function validationTable(checks) {
+  const names = {rally_count_err_pct: "Rally count vs your count", shot_count_err_pct: "Shot count vs your count",
+    net_share_err_pp: "Net-time share vs your labels", unflagged_swaps_per_5min: "Unflagged partner swaps (per 5 min)",
+    stats_without_confidence: "Stats without a confidence label"};
+  const units = {rally_count_err_pct: "% off", shot_count_err_pct: "% off", net_share_err_pp: " pts off", unflagged_swaps_per_5min: "", stats_without_confidence: ""};
+  if (!checks || !checks.length) return `<p class="muted">Nothing to compare yet. Label some shots first.</p>`;
+  return `<div class="tw"><table><tr><th>Check</th><th>Result</th><th>Allowed</th><th></th><th>Details</th></tr>
+  ${checks.map(c => `<tr><td>${names[c.metric] || c.metric}</td><td>${c.value}${units[c.metric] || ""}</td><td>≤ ${c.threshold}${units[c.metric] || ""}</td>
+    <td>${c.passed ? '<span class="badge ok">PASS</span>' : '<span class="badge bad">FAIL</span>'}</td><td class="muted small">${esc(c.detail)}</td></tr>`).join("")}</table></div>`;
+}
+
+function resultsView(run) {
+  const id = run.id, res = run.results || {stats: []};
+  const f = `/files/${id}/out/`;
+  $("#app").innerHTML = `<h1>${esc(run.name)}</h1>
+  <div class="card"><div class="row">
+    <a class="btn primary big" href="${f}report.html" target="_blank">Open full report ↗</a>
+    <a class="btn big" href="#/label/${id}">✍ Hand-count to check it</a>
+    ${run.has_labels ? `<button class="big" id="val">Check against my hand count</button>` : ""}
+    <button id="again">Re-analyze with other settings</button>
+  </div>
+  <p class="muted small" style="margin:10px 0 0">Court: ${esc(run.court?.source || "")}${run.court?.score != null ? ` (line score ${run.court.score})` : ""}
+   · Summary: ${esc(run.summary_status || "")}
+   · Download: <a href="${f}timeline.json" download>timeline.json</a> · <a href="${f}events.csv" download>events.csv</a>
+   · <a href="${f}positions.csv" download>positions.csv</a> · <a href="${f}shots.csv" download>shots.csv</a>
+   · <a href="${f}rallies.csv" download>rallies.csv</a></p></div>
+  ${run.validation ? `<div class="card"><h2>Check against your hand count</h2>${validationTable(run.validation)}</div>` : ""}
+  <div class="card"><h2>Stats</h2>${statsTable(res.stats || [])}</div>`;
+  $("#again").onclick = () => runView(id, true);
+  if ($("#val")) $("#val").onclick = async () => { try { await api(`runs/${id}/validate`, {method: "POST"}); runView(id); } catch (e) { toast(e.message); } };
+}
+
+// ---------------------------------------------------------------- labeling
+async function labelView(id) {
+  const run = await api("runs/" + id);
+  const saved = await api(`runs/${id}/labels`);
+  const dur = run.info?.duration_s || 0;
+  const S = {shots: (saved._ui_shots || []).slice(), rally: saved._ui_rally ?? 0,
+    win: saved.window ? [saved.window.start, saved.window.end] : [0, dur], showPos: false};
+  if (!saved._ui_shots && saved.shots) {
+    S.shots = saved.shots.map(t => ({t, rally: (saved.rallies || []).findIndex(r => t >= r.start - 1e-6 && t <= r.end + 1e-6), pos: {}}));
+    S.rally = (saved.rallies || []).length;
+  }
+  const src = run.preview_file ? `/files/${id}/${run.preview_file}` : `/files/${id}/${run.video_file}`;
+  const hasAnalysis = run.state === "done";
+  $("#app").innerHTML = `<h1>Hand count · ${esc(run.name)}</h1>
+  <div class="card">
+    <div class="canvaswrap" style="position:relative">
+      <video id="v" src="${src}" preload="auto" controls playsinline style="width:100%;display:block"></video>
+      <canvas id="overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></canvas>
+    </div>
+    <div id="vfail" class="bad" hidden style="margin-top:8px">Your browser can't play this video format.
+      <button id="mkprev">Make a playable copy</button> <span id="prevstate" class="muted small"></span></div>
+    <div class="row" style="margin-top:12px">
+      <button id="back2">⏪ 2 s</button><button id="play">▶ Play</button><button id="fwd2">2 s ⏩</button>
+      <span class="seg" id="speed"><button data-r="0.25">¼×</button><button data-r="0.5" class="on">½×</button><button data-r="1">1×</button></span>
+      <span class="sp" style="flex:1"></span>
+      <button class="primary big" id="shot">🎾 Shot <span class="kbd">S</span></button>
+      <button class="big" id="endr">End of rally <span class="kbd">E</span></button>
+      <button id="undo">Undo <span class="kbd">Z</span></button>
+    </div>
+    <p class="muted small" style="margin:8px 0 0">Play at ½ speed. Press <b>Shot</b> each time a player hits the ball, and <b>End of rally</b> when the point is over.
+      <span class="kbd">Space</span> play/pause · <span class="kbd">←</span>/<span class="kbd">→</span> 2 s.</p>
+    <label class="row small" style="margin-top:8px">
+      <input type="checkbox" id="showdet" ${hasAnalysis ? "" : "disabled"}>
+      Show detected players (green you, blue partner, red opponents) and ball (yellow)
+      ${hasAnalysis ? "" : `<span class="muted small">(analyze the video first)</span>`}
+    </label>
+  </div>
+  <div class="card"><div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">Labelled section</h2>
+    <span class="row small">From <b id="ws"></b> <button id="setws">Set to now</button> to <b id="we"></b> <button id="setwe">Set to now</button></span></div>
+    <p class="muted small" style="margin:8px 0 0">Only this part of the video is compared, so you don't have to label the whole match. Set the end to where you stopped.</p></div>
+  <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0" id="count"></h2>
+    <div class="row"><label class="small row"><input type="checkbox" id="showpos"> Also label player positions (for the net-time check)</label>
+    <span class="muted small" id="saved"></span></div></div>
+    <div id="list" style="margin-top:10px"></div></div>
+  <div class="card"><div class="row"><button class="primary big" id="val">Compare with the analysis</button>
+    <a class="btn" href="#/run/${id}">Back to results</a></div><div id="valout" style="margin-top:12px"></div></div>`;
+
+  const v = $("#v");
+  v.playbackRate = 0.5;
+  v.onerror = () => { $("#vfail").hidden = false; };
+
+  // -- detection overlay (players + ball, toggleable, off by default) -------
+  const overlay = $("#overlay");
+  const octx = overlay.getContext("2d");
+  let detections = null;  // {players, byPlayer, myTeam, ball}
+  let overlayOn = false;
+  stopOverlay = () => { overlayOn = false; };
+
+  function nearestByTime(rows, t, tol) {
+    let best = null, bestDt = tol;
+    for (const r of rows) { const dt = Math.abs(r.t - t); if (dt < bestDt) { best = r; bestDt = dt; } }
+    return best;
+  }
+  function roleColor(pid) {
+    const info = detections.players[pid];
+    if (!info) return "#aaaaaa";
+    if (info.is_user) return "#00e676";       // green: you
+    return info.team === detections.myTeam ? "#448aff" : "#ff5252";  // blue: partner, red: opponent
+  }
+  function drawOverlay() {
+    if (!overlayOn || !detections) { octx.clearRect(0, 0, overlay.width, overlay.height); return; }
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    const t = v.currentTime;
+    const lw = Math.max(2, overlay.width / 500);
+    for (const pid of Object.keys(detections.players)) {
+      const pts = detections.byPlayer[pid] || [];
+      const p = nearestByTime(pts, t, 0.2);
+      if (!p || !p.bbox) continue;
+      const [x1, y1, x2, y2] = p.bbox;
+      octx.strokeStyle = roleColor(pid);
+      octx.lineWidth = lw;
+      octx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+      octx.fillStyle = octx.strokeStyle;
+      octx.font = `bold ${lw * 8}px system-ui`;
+      octx.fillText(pid, x1, y1 - lw * 2);
+    }
+    const b = nearestByTime(detections.ball, t, 0.2);
+    if (b) {
+      octx.strokeStyle = "#ffeb3b"; octx.lineWidth = lw;
+      octx.beginPath(); octx.arc(b.x, b.y, lw * 5, 0, 7); octx.stroke();
+    }
+    if (overlayOn) requestAnimationFrame(drawOverlay);
+  }
+  async function loadDetections() {
+    const tl = await (await fetch(`/files/${id}/out/timeline.json`)).json();
+    const byPlayer = {};
+    for (const p of tl.positions) (byPlayer[p.player] = byPlayer[p.player] || []).push(p);
+    const me = Object.entries(tl.players).find(([, info]) => info.is_user);
+    detections = {
+      players: tl.players, byPlayer, myTeam: me ? me[1].team : null,
+      ball: tl.ball_positions || [],
+    };
+  }
+  function resizeOverlay() {
+    if (v.videoWidth) { overlay.width = v.videoWidth; overlay.height = v.videoHeight; }
+  }
+  v.addEventListener("loadedmetadata", resizeOverlay);
+  if ($("#showdet")) $("#showdet").onchange = async e => {
+    overlayOn = e.target.checked;
+    if (overlayOn && !detections) { try { await loadDetections(); } catch { toast("Could not load detections"); overlayOn = false; e.target.checked = false; return; } }
+    resizeOverlay();
+    if (overlayOn) requestAnimationFrame(drawOverlay);
+    else octx.clearRect(0, 0, overlay.width, overlay.height);
+  };
+  $("#mkprev").onclick = async () => {
+    await api(`runs/${id}/preview`, {method: "POST"});
+    $("#prevstate").textContent = "Converting… this can take a few minutes.";
+    const t = setInterval(async () => { const r = await api("runs/" + id);
+      if (r.preview_state === "done") { clearInterval(t); labelView(id); }
+      if (r.preview_state === "error") { clearInterval(t); $("#prevstate").textContent = "Conversion failed: " + r.preview_error; } }, 2000);
+  };
+  const setPlay = () => $("#play").textContent = v.paused ? "▶ Play" : "⏸ Pause";
+  v.onplay = v.onpause = setPlay;
+  $("#play").onclick = () => v.paused ? v.play() : v.pause();
+  $("#back2").onclick = () => v.currentTime = Math.max(0, v.currentTime - 2);
+  $("#fwd2").onclick = () => v.currentTime = v.currentTime + 2;
+  document.querySelectorAll("#speed button").forEach(b => b.onclick = () => { v.playbackRate = +b.dataset.r;
+    document.querySelectorAll("#speed button").forEach(x => x.classList.toggle("on", x === b)); });
+
+  let saveT = null;
+  const persist = () => { $("#saved").textContent = "Saving…"; clearTimeout(saveT); saveT = setTimeout(async () => {
+    await api(`runs/${id}/labels`, {method: "PUT", body: buildLabels()}); $("#saved").textContent = "✓ Saved"; }, 400); };
+  function buildLabels() {
+    const shots = S.shots.slice().sort((a, b) => a.t - b.t);
+    const groups = {};
+    shots.forEach(s => (groups[s.rally] = groups[s.rally] || []).push(s.t));
+    const rallies = Object.values(groups).map(ts => ({start: Math.min(...ts), end: Math.max(...ts)})).sort((a, b) => a.start - b.start);
+    const pos = [];
+    shots.forEach(s => Object.entries(s.pos || {}).forEach(([p, o]) => { if (o.zone) pos.push({t: s.t, player: p, zone: o.zone, ...(o.side ? {side: o.side} : {})}); }));
+    return {window: {start: S.win[0], end: S.win[1]}, rallies, shots: shots.map(s => s.t), positions_at_shots: pos,
+      _ui_shots: S.shots, _ui_rally: S.rally};
+  }
+  function render() {
+    $("#ws").textContent = fmtT(S.win[0]); $("#we").textContent = fmtT(S.win[1]);
+    const shots = S.shots.slice().sort((a, b) => a.t - b.t);
+    const nR = new Set(shots.map(s => s.rally)).size;
+    $("#count").textContent = `${shots.length} shots · ${nR} rallies`;
+    const P = ["P1", "P2", "P3", "P4"];
+    const seg = (s, p, key, vals, labels) => `<span class="seg">${vals.map((val, i) =>
+      `<button data-t="${s.t}" data-p="${p}" data-k="${key}" data-v="${val}" class="${(s.pos?.[p]?.[key]) === val ? "on" : ""}">${labels[i]}</button>`).join("")}</span>`;
+    let html = "", last = null;
+    shots.forEach(s => {
+      if (s.rally !== last) { html += `<tr><td colspan="${S.showPos ? 6 : 2}" style="padding-top:12px"><b>Rally ${[...new Set(shots.map(x => x.rally))].indexOf(s.rally) + 1}</b></td></tr>`; last = s.rally; }
+      html += `<tr class="shotrow"><td><button data-seek="${s.t}">${fmtT(s.t)}</button></td>
+        ${S.showPos ? P.map(p => `<td><span class="small muted">${p}</span><br>${seg(s, p, "zone", ["net", "back"], ["Net", "Back"])}
+        ${seg(s, p, "side", ["left", "right"], ["L", "R"])}</td>`).join("") : ""}
+        <td style="text-align:right"><button class="danger" data-rm="${s.t}">✕</button></td></tr>`;
+    });
+    $("#list").innerHTML = shots.length ? `<div class="tw"><table>${S.showPos ? `<tr><td class="muted small">Time</td><td colspan="4" class="muted small">
+      For each shot: was the player in the front (Net) or back half of their side? L/R = left or right of their partner, seen from the camera. Optional.</td><td></td></tr>` : ""}${html}</table></div>`
+      : `<p class="muted">No shots yet. Play the video and press <b>Shot</b>.</p>`;
+    $("#list").querySelectorAll("[data-seek]").forEach(b => b.onclick = () => { v.currentTime = +b.dataset.seek; v.pause(); });
+    $("#list").querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { S.shots = S.shots.filter(s => s.t !== +b.dataset.rm); render(); persist(); });
+    $("#list").querySelectorAll("[data-k]").forEach(b => b.onclick = () => {
+      const s = S.shots.find(x => x.t === +b.dataset.t); s.pos = s.pos || {}; const o = s.pos[b.dataset.p] = s.pos[b.dataset.p] || {};
+      o[b.dataset.k] = o[b.dataset.k] === b.dataset.v ? undefined : b.dataset.v; render(); persist(); });
+  }
+  const addShot = () => { const t = Math.round(v.currentTime * 1000) / 1000; if (S.shots.some(s => Math.abs(s.t - t) < 0.05)) return;
+    S.shots.push({t, rally: S.rally, pos: {}}); toast("Shot " + fmtT(t)); render(); persist(); };
+  const endRally = () => { if (!S.shots.some(s => s.rally === S.rally)) return toast("No shots in this rally yet"); S.rally += 1; toast("Rally ended"); render(); persist(); };
+  const undo = () => { if (!S.shots.length) return; const lastS = S.shots.reduce((a, b) => a.t > b.t ? a : b);
+    S.shots = S.shots.filter(s => s !== lastS); render(); persist(); };
+  $("#shot").onclick = addShot; $("#endr").onclick = endRally; $("#undo").onclick = undo;
+  $("#setws").onclick = () => { S.win[0] = v.currentTime; render(); persist(); };
+  $("#setwe").onclick = () => { S.win[1] = v.currentTime; render(); persist(); };
+  $("#showpos").onchange = e => { S.showPos = e.target.checked; render(); };
+  document.onkeydown = e => {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+    const k = e.key.toLowerCase();
+    if (k === "s") addShot(); else if (k === "e") endRally(); else if (k === "z") undo();
+    else if (k === " ") { e.preventDefault(); v.paused ? v.play() : v.pause(); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 2); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); v.currentTime += 2; }
+    else return;
+  };
+  $("#val").onclick = async () => {
+    await api(`runs/${id}/labels`, {method: "PUT", body: buildLabels()});
+    try { $("#valout").innerHTML = validationTable(await api(`runs/${id}/validate`, {method: "POST"})); }
+    catch (e) { $("#valout").innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+  };
+  render();
+}
+
+loadEnv().then(route);
+</script>
+</body>
+</html>

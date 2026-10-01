@@ -1,0 +1,2 @@
+[console_scripts]
+padelfusion = padelfusion.cli:main

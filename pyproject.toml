@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "padelfusion"
+version = "0.1.0"
+description = "Padel match video analyzer v0: positional and rally stats from one fixed phone camera"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "opencv-python-headless>=4.8",
+    "matplotlib>=3.7",
+    "imageio-ffmpeg>=0.4.9",
+]
+
+[project.optional-dependencies]
+yolo = ["ultralytics>=8.0"]
+llm = ["anthropic>=0.70"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+padelfusion = "padelfusion.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+padelfusion = ["web/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
